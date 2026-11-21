@@ -88,7 +88,7 @@ while true; do
         --shape VM.Standard.A1.Flex --shape-config "{\"ocpus\":$OCPUS,\"memoryInGBs\":$MEM_GB}" \
         --image-id "$IMG" --subnet-id "$SUBNET" --assign-public-ip true \
         --boot-volume-size-in-gbs "$BOOT_GB" --display-name "$NAME" \
-        --ssh-authorized-keys-file "$KEYFILE" 2>&1)
+        --ssh-authorized-keys-file "$KEYFILE" --no-retry 2>&1)
 
   if echo "$OUT" | grep -q '"lifecycle-state"'; then
     say "SUCCESS - instance created."
@@ -111,6 +111,10 @@ while true; do
     say "  Out of capacity. Retrying in ${SLEEP_SECS}s..."
     sleep "$SLEEP_SECS"
   elif echo "$OUT" | grep -qi 'TooManyRequests\|"status": 429'; then
+    if [ -n "${MAX_ATTEMPTS:-}" ]; then
+      say "  Rate limited. Next scheduled run will try again."
+      exit 0
+    fi
     say "  Rate limited. Waiting 3 min..."
     sleep 180
   else
