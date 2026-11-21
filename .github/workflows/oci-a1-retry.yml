@@ -1,0 +1,67 @@
+name: oci-a1-retry
+
+# Tries to grab an Always Free Oracle A1 VM (2 OCPU / 12 GB, Mumbai) every 15 minutes.
+# On success it opens an issue (you get notified) and disables itself.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write   # to disable this workflow after success
+  issues: write    # to notify you via an issue
+
+concurrency:
+  group: oci-a1-retry
+  cancel-in-progress: false
+
+jobs:
+  try:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OCI CLI
+        run: pip install --quiet oci-cli
+
+      - name: Write OCI config
+        env:
+          OCI_USER: ${{ secrets.OCI_USER_OCID }}
+          OCI_TENANCY: ${{ secrets.OCI_TENANCY_OCID }}
+          OCI_FP: ${{ secrets.OCI_FINGERPRINT }}
+          OCI_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.oci
+          printf '%s\n' "$OCI_KEY" > ~/.oci/key.pem
+          chmod 600 ~/.oci/key.pem
+          cat > ~/.oci/config <<EOF
+          [DEFAULT]
+          user=$OCI_USER
+          fingerprint=$OCI_FP
+          tenancy=$OCI_TENANCY
+          region=ap-mumbai-1
+          key_file=$HOME/.oci/key.pem
+          EOF
+          chmod 600 ~/.oci/config
+
+      - name: Try to launch A1 (one attempt per run)
+        id: launch
+        env:
+          OCI_TENANCY: ${{ secrets.OCI_TENANCY_OCID }}
+          MAX_ATTEMPTS: "1"
+          QUIET: "1"
+          OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING: "True"
+        run: bash oci-a1-retry.sh
+
+      - name: Got it - notify and stop retrying
+        if: steps.launch.outputs.done == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Oracle A1 VM created" \
+            --body "surajvps exists. Get its public IP in the Oracle console (Compute > Instances). Then delete the OCI API key used by this repo." || true
+          gh workflow disable "${{ github.workflow }}" --repo "$GITHUB_REPOSITORY"
